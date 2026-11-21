@@ -1,11 +1,6 @@
 {
   "ExpandedNodes": [
-    "",
-    "\\src",
-    "\\src\\Core",
-    "\\src\\Resource",
-    "\\src\\Resource\\Fonts"
+    "\\src"
   ],
-  "SelectedNode": "\\src\\Core\\Stats.h",
   "PreviewInSolutionExplorer": false
 }
