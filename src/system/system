@@ -50,7 +50,8 @@ typedef enum {
     SAVE_ERR_FORMAT,
     SAVE_ERR_VERSION,
     SAVE_ERR_DATA,
-    SAVE_ERR_NOT_FOUND
+    SAVE_ERR_NOT_FOUND,
+    SAVE_ERR_KEY_CONFLICT
 } SaveResult;
 
 static FILE *sg_open(const char *name, const char *mode)
@@ -179,7 +180,7 @@ static SaveResult loadGame(GameState *g, const char *filename)
     fclose(f);
 
     if (!sg_validate(&tmp)) return SAVE_ERR_DATA;
-    *g = tmp;               /* chi ghi de khi du lieu hop le */
+    *g = tmp;
     return SAVE_OK;
 }
 
@@ -210,14 +211,163 @@ static int slotExists(int slot)
 static const char *saveResultMessage(SaveResult r)
 {
     switch (r) {
-        case SAVE_OK:            return "Thanh cong";
-        case SAVE_ERR_OPEN:      return "Khong mo/ghi duoc file";
-        case SAVE_ERR_FORMAT:    return "File sai dinh dang";
-        case SAVE_ERR_VERSION:   return "File save khac phien ban";
-        case SAVE_ERR_DATA:      return "Du lieu trong file khong hop le";
-        case SAVE_ERR_NOT_FOUND: return "Khong tim thay file save";
-        default:                 return "Loi khong xac dinh";
+        case SAVE_OK:               return "Thanh cong";
+        case SAVE_ERR_OPEN:         return "Khong mo/ghi duoc file";
+        case SAVE_ERR_FORMAT:       return "File sai dinh dang";
+        case SAVE_ERR_VERSION:      return "File save khac phien ban";
+        case SAVE_ERR_DATA:         return "Du lieu khong hop le";
+        case SAVE_ERR_NOT_FOUND:    return "Khong tim thay file";
+        case SAVE_ERR_KEY_CONFLICT: return "Phim da duoc gan cho hanh dong khac";
+        default:                    return "Loi khong xac dinh";
     }
 }
 
-#endif 
+#define SETTINGS_FILE  SAVE_DIR "/settings.cfg"
+#define SETTINGS_MAGIC "CARO_SETTINGS"
+#define SETTINGS_VER   1
+
+typedef enum {
+    ACT_UP = 0, ACT_DOWN, ACT_LEFT, ACT_RIGHT,
+    ACT_PLACE, ACT_UNDO, ACT_PAUSE, ACT_SAVE,
+    ACT_COUNT
+} KeyAction;
+
+typedef struct {
+    int keys[ACT_COUNT];
+    int musicOn;
+    int musicVolume;
+    int soundOn;
+    int soundVolume;
+    int turnTimeLimit;
+    int gameTimeLimit;
+} Settings;
+
+static int sg_validateSettings(const Settings *s)
+{
+    if (s->musicOn != 0 && s->musicOn != 1)                 return 0;
+    if (s->soundOn != 0 && s->soundOn != 1)                 return 0;
+    if (s->musicVolume < 0 || s->musicVolume > 100)         return 0;
+    if (s->soundVolume < 0 || s->soundVolume > 100)         return 0;
+    if (s->turnTimeLimit < 0 || s->turnTimeLimit > 3600)    return 0;
+    if (s->gameTimeLimit < 0 || s->gameTimeLimit > 86400)   return 0;
+
+    for (int i = 0; i < ACT_COUNT; i++) {
+        if (s->keys[i] < 1 || s->keys[i] > 255) return 0;
+        for (int j = i + 1; j < ACT_COUNT; j++)
+            if (s->keys[i] == s->keys[j]) return 0;
+    }
+    return 1;
+}
+
+static const char *keyActionName(KeyAction a)
+{
+    static const char *names[ACT_COUNT] = {
+        "Len", "Xuong", "Trai", "Phai", "Dat quan", "Undo", "Tam dung", "Luu game"
+    };
+    return (a >= 0 && a < ACT_COUNT) ? names[a] : "?";
+}
+
+static void initSettings(Settings *s)
+{
+    memset(s, 0, sizeof(*s));
+    s->keys[ACT_UP]    = 'w';
+    s->keys[ACT_DOWN]  = 's';
+    s->keys[ACT_LEFT]  = 'a';
+    s->keys[ACT_RIGHT] = 'd';
+    s->keys[ACT_PLACE] = 13;
+    s->keys[ACT_UNDO]  = 'u';
+    s->keys[ACT_PAUSE] = 'p';
+    s->keys[ACT_SAVE]  = 'k';
+    s->musicOn = 1;  s->musicVolume = 70;
+    s->soundOn = 1;  s->soundVolume = 70;
+    s->turnTimeLimit = 0;
+    s->gameTimeLimit = 0;
+}
+
+static SaveResult setKeybind(Settings *s, KeyAction a, int key)
+{
+    if (a < 0 || a >= ACT_COUNT || key < 1 || key > 255) return SAVE_ERR_DATA;
+    for (int i = 0; i < ACT_COUNT; i++)
+        if (i != (int)a && s->keys[i] == key) return SAVE_ERR_KEY_CONFLICT;
+    s->keys[a] = key;
+    return SAVE_OK;
+}
+
+static SaveResult setMusic(Settings *s, int on, int volume)
+{
+    if (volume < 0 || volume > 100) return SAVE_ERR_DATA;
+    s->musicOn = on ? 1 : 0;
+    s->musicVolume = volume;
+    return SAVE_OK;
+}
+
+static SaveResult setSound(Settings *s, int on, int volume)
+{
+    if (volume < 0 || volume > 100) return SAVE_ERR_DATA;
+    s->soundOn = on ? 1 : 0;
+    s->soundVolume = volume;
+    return SAVE_OK;
+}
+
+static SaveResult setTimeLimits(Settings *s, int turnSeconds, int gameSeconds)
+{
+    if (turnSeconds < 0 || turnSeconds > 3600)  return SAVE_ERR_DATA;
+    if (gameSeconds < 0 || gameSeconds > 86400) return SAVE_ERR_DATA;
+    s->turnTimeLimit = turnSeconds;
+    s->gameTimeLimit = gameSeconds;
+    return SAVE_OK;
+}
+
+static SaveResult saveSettings(const Settings *s)
+{
+    SG_MKDIR(SAVE_DIR);
+    FILE *f = sg_open(SETTINGS_FILE, "w");
+    if (!f) return SAVE_ERR_OPEN;
+
+    fprintf(f, "%s %d\n", SETTINGS_MAGIC, SETTINGS_VER);
+    for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "%d ", s->keys[i]);
+    fprintf(f, "\n%d %d %d %d\n", s->musicOn, s->musicVolume, s->soundOn, s->soundVolume);
+    fprintf(f, "%d %d\n", s->turnTimeLimit, s->gameTimeLimit);
+    fprintf(f, "END\n");
+
+    int err = ferror(f);
+    fclose(f);
+    return err ? SAVE_ERR_OPEN : SAVE_OK;
+}
+
+static SaveResult loadSettings(Settings *s)
+{
+    FILE *f = sg_open(SETTINGS_FILE, "r");
+    if (!f) { initSettings(s); return SAVE_ERR_NOT_FOUND; }
+
+    Settings tmp;
+    memset(&tmp, 0, sizeof(tmp));
+
+    char magic[32];
+    int version;
+    if (fscanf(f, "%31s %d", magic, &version) != 2 || strcmp(magic, SETTINGS_MAGIC) != 0) {
+        fclose(f); return SAVE_ERR_FORMAT;
+    }
+    if (version != SETTINGS_VER) { fclose(f); return SAVE_ERR_VERSION; }
+
+    for (int i = 0; i < ACT_COUNT; i++)
+        if (fscanf(f, "%d", &tmp.keys[i]) != 1) { fclose(f); return SAVE_ERR_FORMAT; }
+
+    if (fscanf(f, "%d %d %d %d", &tmp.musicOn, &tmp.musicVolume,
+               &tmp.soundOn, &tmp.soundVolume) != 4 ||
+        fscanf(f, "%d %d", &tmp.turnTimeLimit, &tmp.gameTimeLimit) != 2) {
+        fclose(f); return SAVE_ERR_FORMAT;
+    }
+
+    char endTag[8];
+    if (fscanf(f, "%7s", endTag) != 1 || strcmp(endTag, "END") != 0) {
+        fclose(f); return SAVE_ERR_FORMAT;
+    }
+    fclose(f);
+
+    if (!sg_validateSettings(&tmp)) return SAVE_ERR_DATA;
+    *s = tmp;
+    return SAVE_OK;
+}
+
+#endif
