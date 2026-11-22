@@ -1,38 +1,48 @@
 #ifndef HUD_H
 #define HUD_H
 #include "raylib.h"
-#include "Renderer.h"
+#include "Menu.h"
 #include <stdbool.h>
+
 #define HUD_NAME_MAX_LEN      32
 #define HUD_SAVE_NAME_MAX_LEN 24
 #define HUD_MAX_PIPS          5
-// Điểm
+#define HUD_MAX_BOARD_DIM     30
+// Score
 #define HUD_PNG_PIP_EMPTY          "assets/Button/none.png"
 #define HUD_PNG_PIP_ALPHA          "assets/Button/alpha.png"
 #define HUD_PNG_PIP_OMEGA          "assets/Button/omega.png"
-// Avatar
+// Avt
 #define HUD_PNG_AVATAR_PHOENIX     "assets/Avt/PHOENIX_PROFILE.png"
 #define HUD_PNG_AVATAR_JETT        "assets/Avt/JETT_PROFILE.png"
 #define HUD_PNG_AVATAR_SAGE        "assets/Avt/SAGE_PROFILE.png"
-// Lượt
+// Turn
 #define HUD_PNG_TURN_ALPHA         "assets/Avt/ALPHA_TURN_GUIDE.png"
 #define HUD_PNG_TURN_OMEGA         "assets/Avt/OMEGA_TURN_GUIDE.png"
-// Pause 
+//Pause
 #define HUD_PNG_PAUSE_BG           "assets/Pause/BackGround.png"
 #define HUD_PNG_PAUSE_FULL         "assets/Pause/Tong.png"
 #define HUD_PNG_PAUSE_ICON_NORMAL  "assets/Pause/Pause1.png"
 #define HUD_PNG_PAUSE_ICON_HOVER   "assets/Pause/Pause2.png"
 #define HUD_PNG_CLOSE_NORMAL       "assets/Pause/X1.png"
 #define HUD_PNG_CLOSE_HOVER        "assets/Pause/X2.png"
-// Save
+// Save pause
 #define HUD_PNG_SAVE_NAME_BG       "assets/Pause/14.png"
 #define HUD_PNG_SAVE_NAME_FULL     "assets/Pause/87.png"
 #define HUD_PNG_SAVE_CONFIRM_NORM  "assets/Pause/33.png"
 #define HUD_PNG_SAVE_CONFIRM_HOVER "assets/Pause/35.png"
 #define HUD_PNG_NAME_CLOSE_NORM    "assets/Pause/75.png"
 #define HUD_PNG_NAME_CLOSE_HOVER   "assets/Pause/76.png"
-// Nhạc nền 
-#define HUD_BGM_GAMEPLAY           "assets/Sound/trong tran.mp3"
+// X O
+#define HUD_PNG_PIECE_ALPHA        "assets/Button/49.png"
+#define HUD_PNG_PIECE_OMEGA        "assets/Button/50.png"
+#define HUD_PNG_CELL_EMPTY         "assets/Button/51.png"
+#define HUD_PNG_CELL_HOVER_FRAME   "assets/Button/52.png"
+#define HUD_PNG_CELL_HOVER_OMEGA   "assets/Button/53.png"
+#define HUD_PNG_CELL_HOVER_ALPHA   "assets/Button/54.png"
+// Music
+#define HUD_BGM_GAMEPLAY           "assets/Sound/trongtran.mp3"
+#define HUD_SFX_CELL_HOVER         "assets/Sound/tick.mp3"
 
 typedef enum {
     HUD_AGENT_NONE = 0,
@@ -48,6 +58,14 @@ typedef enum {
     HUD_PAUSE_ACTION_SAVE_CONFIRMED,
     HUD_PAUSE_ACTION_EXIT
 } HudPauseAction;
+
+typedef enum {
+    HUD_MATCH_ONGOING = 0,
+    HUD_MATCH_NEXT_ROUND,
+    HUD_MATCH_GAMEOVER_ALPHA,
+    HUD_MATCH_GAMEOVER_OMEGA,
+    HUD_MATCH_GAMEOVER_DRAW
+} HudMatchStatus;
 
 typedef struct {
     char name[HUD_NAME_MAX_LEN];
@@ -75,7 +93,13 @@ typedef struct {
     Texture2D saveConfirmNormal; 
     Texture2D saveConfirmHover;  
     Texture2D nameCloseNormal;   
-    Texture2D nameCloseHover;    
+    Texture2D nameCloseHover;
+    Texture2D pieceAlpha;
+    Texture2D pieceOmega;
+    Texture2D cellEmpty;
+    Texture2D cellHoverFrame;
+    Texture2D cellHoverOmega;
+    Texture2D cellHoverAlpha;
 } HudPngSlots;
 
 typedef struct {
@@ -90,6 +114,11 @@ typedef struct {
     float turnBlend;
     float switchAnim;
     float pipAnim[2][HUD_MAX_PIPS];
+    int alphaButtons;
+    int omegaButtons;
+    bool matchStopped;
+    int championPiece;
+    HudMatchStatus matchStatus;
     bool isPaused;
     float pauseOpenAnim;
     bool hoverPauseIcon;
@@ -121,6 +150,14 @@ typedef struct {
     bool bgmPlaying;
     float bgmBaseVolume;
 
+    Sound cellHoverSfx;
+    bool cellHoverSfxLoaded;
+    float sfxVolume;
+    int hoveredCellRow;
+    int hoveredCellCol;
+    float cellHoverAnim[HUD_MAX_BOARD_DIM][HUD_MAX_BOARD_DIM];
+    float cellPlaceAnim[HUD_MAX_BOARD_DIM][HUD_MAX_BOARD_DIM];
+
     HudPngSlots png;
 } GameHUD;
 
@@ -144,5 +181,31 @@ const char *HUD_GetSaveName(const GameHUD *hud);
 void HUD_StartMusic(GameHUD *hud);
 void HUD_StopMusic(GameHUD *hud);
 void HUD_SetMusicVolume(GameHUD *hud, float volume);
+
+void HUD_ResetMatchScore(GameHUD *hud);
+HudMatchStatus HUD_AccumulateButtonPoint(GameHUD *hud, int winnerPiece);
+HudMatchStatus HUD_OnRoundDraw(GameHUD *hud);
+bool HUD_IsMatchStopped(const GameHUD *hud);
+HudMatchStatus HUD_GetMatchStatus(const GameHUD *hud);
+int HUD_GetChampionPiece(const GameHUD *hud);
+
+void HUD_SetSfxVolume(GameHUD *hud, float volume);
+void HUD_ResetBoardVisuals(GameHUD *hud);
+bool HUD_UpdateBoardCell(GameHUD *hud,
+                         MenuUI *menu,
+                         Rectangle boardRect,
+                         int rows,
+                         int cols,
+                         const int board[HUD_MAX_BOARD_DIM][HUD_MAX_BOARD_DIM],
+                         bool canInteract,
+                         int *outClickedRow,
+                         int *outClickedCol,
+                         float dt);
+void HUD_DrawBoardCell(const GameHUD *hud,
+                       Rectangle cellRect,
+                       int row,
+                       int col,
+                       int cellValue,
+                       bool isWinningCell);
 
 #endif

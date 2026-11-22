@@ -32,17 +32,17 @@ static float Clamp01(float v) {
     return v;
 }
 
-static float s_hoverDuration = 0.0f;
-static float s_hoverTimer    = 0.0f;
-static bool  s_hoverLooping  = false;
+static void PlayMenuHoverOnce(MenuUI *menu) {
+    if (!menu || !menu->audioLoaded) return;
+    StopSound(menu->hoverSfx);
+    PlaySound(menu->hoverSfx);
+}
 
-static float s_clickDuration = 0.0f;
-static float s_clickTimer    = 0.0f;
-static bool  s_clickLooping  = false;
-
-static float GetSoundDurationSec(Sound sfx) {
-    if (sfx.stream.sampleRate == 0) return 0.0f;
-    return (float)sfx.frameCount / (float)sfx.stream.sampleRate;
+static void PlayMenuClickOnce(MenuUI *menu) {
+    if (!menu || !menu->audioLoaded) return;
+    StopSound(menu->hoverSfx);
+    StopSound(menu->clickSfx);
+    PlaySound(menu->clickSfx);
 }
 
 void Menu_Resize(MenuUI *menu, int screenWidth, int screenHeight) {
@@ -63,19 +63,32 @@ void Menu_Resize(MenuUI *menu, int screenWidth, int screenHeight) {
             btnH
         };
     }
+
+    float cornerSize = fminf(44.0f, sh * 0.055f);
+    float margin     = fmaxf(18.0f, sw * 0.018f);
+    menu->exitCornerBtn.baseBounds = (Rectangle){
+        sw - cornerSize - margin,
+        margin,
+        cornerSize,
+        cornerSize
+    };
 }
 
 void Menu_ResetIntroAnim(MenuUI *menu) {
     if (!menu) return;
     menu->openAnim = 0.0f;
     menu->selectedIndex = -1;
-    s_hoverLooping = false;
-    s_clickLooping = false;
+    menu->exitRequested = false;
+
     for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
         menu->buttons[i].hoverAnim = 0.0f;
         menu->buttons[i].isHovered = false;
         menu->buttons[i].isPressed = false;
     }
+
+    menu->exitCornerBtn.hoverAnim = 0.0f;
+    menu->exitCornerBtn.isHovered = false;
+    menu->exitCornerBtn.isPressed = false;
 }
 
 void Menu_Init(MenuUI *menu, int screenWidth, int screenHeight) {
@@ -110,12 +123,14 @@ void Menu_Init(MenuUI *menu, int screenWidth, int screenHeight) {
         menu->buttons[i].action = actions[i];
     }
 
+    menu->exitCornerBtn.normal = LoadTextureSafe(MENU_IMG_CLOSE_1);
+    menu->exitCornerBtn.active = LoadTextureSafe(MENU_IMG_CLOSE_2);
+    menu->exitCornerBtn.action = MENU_ACTION_EXIT;
+
     if (IsAudioDeviceReady()) {
         if (FileExists(MENU_SFX_HOVER) && FileExists(MENU_SFX_CLICK)) {
             menu->hoverSfx = LoadSound(MENU_SFX_HOVER);
             menu->clickSfx = LoadSound(MENU_SFX_CLICK);
-            s_hoverDuration = GetSoundDurationSec(menu->hoverSfx);
-            s_clickDuration = GetSoundDurationSec(menu->clickSfx);
             menu->audioLoaded = true;
         }
         if (FileExists(MENU_BGM_PATH)) {
@@ -144,13 +159,12 @@ void Menu_StopMusic(MenuUI *menu) {
         StopSound(menu->hoverSfx);
         StopSound(menu->clickSfx);
     }
-    s_hoverLooping = false;
-    s_clickLooping = false;
 }
 
 void Menu_Update(MenuUI *menu, MenuAction *outAction, float dt) {
     if (outAction) *outAction = MENU_ACTION_NONE;
     if (!menu) return;
+
     if (menu->bgmLoaded) {
         UpdateMusicStream(menu->bgm);
         float totalLen = GetMusicTimeLength(menu->bgm);
@@ -161,27 +175,11 @@ void Menu_Update(MenuUI *menu, MenuAction *outAction, float dt) {
             PlayMusicStream(menu->bgm);
         }
     }
-    if (menu->audioLoaded && s_hoverLooping) {
-        s_hoverTimer += dt;
-        if (!IsSoundPlaying(menu->hoverSfx) || (s_hoverDuration > 0.0f && s_hoverTimer >= s_hoverDuration - 0.02f)) {
-            StopSound(menu->hoverSfx);
-            PlaySound(menu->hoverSfx);
-            s_hoverTimer = 0.0f;
-        }
-    }
-    if (menu->audioLoaded && s_clickLooping) {
-        s_clickTimer += dt;
-        if (!IsSoundPlaying(menu->clickSfx) || (s_clickDuration > 0.0f && s_clickTimer >= s_clickDuration - 0.02f)) {
-            StopSound(menu->clickSfx);
-            PlaySound(menu->clickSfx);
-            s_clickTimer = 0.0f;
-        }
-    }
+
     if (menu->openAnim < 1.0f) {
-        menu->openAnim += dt * 1.4f; // Chuyển tiếp mượt trong ~0.7 giây
+        menu->openAnim += dt * 1.4f;
         if (menu->openAnim > 1.0f) menu->openAnim = 1.0f;
 
-        // Cho phép bấm chuột/phím để bỏ qua animation intro nếu người chơi muốn vào nhanh
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
             menu->openAnim = 1.0f;
         } else {
@@ -203,27 +201,36 @@ void Menu_Update(MenuUI *menu, MenuAction *outAction, float dt) {
         }
     }
 
+    bool prevCornerHover = menu->exitCornerBtn.isHovered;
+    menu->exitCornerBtn.isHovered = CheckCollisionPointRec(mouse, menu->exitCornerBtn.baseBounds);
+    menu->exitCornerBtn.isPressed = menu->exitCornerBtn.isHovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+
+    if (menu->exitCornerBtn.isHovered && !prevCornerHover) {
+        PlayMenuHoverOnce(menu);
+    }
+
+    float cornerTarget = menu->exitCornerBtn.isHovered ? 1.0f : 0.0f;
+    menu->exitCornerBtn.hoverAnim += (cornerTarget - menu->exitCornerBtn.hoverAnim) * Clamp01(dt * 14.0f);
+
     if (hoveredIndex != -1) {
         menu->selectedIndex = hoveredIndex;
+    } else if (prevSelected != -1 && !IsKeyPressed(KEY_DOWN) && !IsKeyPressed(KEY_S) &&
+               !IsKeyPressed(KEY_UP) && !IsKeyPressed(KEY_W)) {
+        menu->selectedIndex = -1;
     }
+
     if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S)) {
         menu->selectedIndex = (menu->selectedIndex + 1) % MENU_BUTTON_COUNT;
     }
     if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W)) {
         menu->selectedIndex = (menu->selectedIndex <= 0) ? (MENU_BUTTON_COUNT - 1) : (menu->selectedIndex - 1);
     }
-    if (menu->selectedIndex != prevSelected && menu->audioLoaded) {
-        if (menu->selectedIndex >= 0) {
-            StopSound(menu->hoverSfx);
-            PlaySound(menu->hoverSfx);
-            s_hoverTimer   = 0.0f;
-            s_hoverLooping = true;
-        } else {
-            StopSound(menu->hoverSfx);
-            s_hoverLooping = false;
-        }
+
+    if (menu->selectedIndex != prevSelected && menu->selectedIndex >= 0) {
+        PlayMenuHoverOnce(menu);
     }
-    bool anyHover = false;
+
+    bool anyHover = menu->exitCornerBtn.isHovered;
     for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
         MenuButton *btn = &menu->buttons[i];
         bool activeState = (btn->isHovered || menu->selectedIndex == i);
@@ -233,27 +240,26 @@ void Menu_Update(MenuUI *menu, MenuAction *outAction, float dt) {
         btn->hoverAnim += (target - btn->hoverAnim) * Clamp01(dt * 14.0f);
     }
 
-    if (!anyHover && s_hoverLooping && menu->audioLoaded) {
-        StopSound(menu->hoverSfx);
-        s_hoverLooping = false;
-        menu->selectedIndex = -1;
+    SetMouseCursor(anyHover ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
+
+    bool cornerExitClicked = (menu->exitCornerBtn.isHovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT));
+    if (cornerExitClicked || IsKeyPressed(KEY_ESCAPE)) {
+        PlayMenuClickOnce(menu);
+        menu->exitRequested = true;
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        if (outAction) *outAction = MENU_ACTION_EXIT;
+        return;
     }
 
-    SetMouseCursor(anyHover ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
     for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
         MenuButton *btn = &menu->buttons[i];
-        bool clicked = (btn->isHovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT));
+        bool clicked  = (btn->isHovered && IsMouseButtonReleased(MOUSE_BUTTON_LEFT));
         bool keyEnter = (menu->selectedIndex == i && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)));
 
         if (clicked || keyEnter) {
-            if (menu->audioLoaded) {
-                StopSound(menu->hoverSfx);
-                s_hoverLooping = false;
-
-                StopSound(menu->clickSfx);
-                PlaySound(menu->clickSfx);
-                s_clickTimer   = 0.0f;
-                s_clickLooping = true;
+            PlayMenuClickOnce(menu);
+            if (btn->action == MENU_ACTION_EXIT) {
+                menu->exitRequested = true;
             }
             SetMouseCursor(MOUSE_CURSOR_DEFAULT);
             if (outAction) *outAction = btn->action;
@@ -267,7 +273,7 @@ void Menu_Draw(const MenuUI *menu) {
 
     float sw = (float)GetScreenWidth();
     float sh = (float)GetScreenHeight();
-    float t  = menu->openAnim; // 0.0 -> 1.0
+    float t  = menu->openAnim;
     float bgAlpha = Clamp01(t / 0.5f);
     float easeOut = 1.0f - powf(1.0f - bgAlpha, 3.0f);
     float scale   = 1.04f - 0.04f * easeOut;
@@ -288,6 +294,7 @@ void Menu_Draw(const MenuUI *menu) {
     if (menu->full.id > 0 && fullAlpha > 0.0f) {
         DrawTextureFit(menu->full, bgRect, Fade(WHITE, fullAlpha));
     }
+
     if (t >= 0.95f) {
         for (int i = 0; i < MENU_BUTTON_COUNT; i++) {
             const MenuButton *btn = &menu->buttons[i];
@@ -316,6 +323,21 @@ void Menu_Draw(const MenuUI *menu) {
                 }
             }
         }
+
+        const MenuButton *cornerBtn = &menu->exitCornerBtn;
+        Rectangle cRect = cornerBtn->baseBounds;
+        if (cornerBtn->isPressed) {
+            cRect.x += 1.5f;
+            cRect.y += 1.5f;
+            cRect.width -= 3.0f;
+            cRect.height -= 3.0f;
+        }
+        if (cornerBtn->normal.id > 0) {
+            DrawTextureFit(cornerBtn->normal, cRect, WHITE);
+        }
+        if (cornerBtn->active.id > 0 && cornerBtn->hoverAnim > 0.01f) {
+            DrawTextureFit(cornerBtn->active, cRect, Fade(WHITE, cornerBtn->hoverAnim));
+        }
     }
 }
 
@@ -328,6 +350,10 @@ void Menu_Unload(MenuUI *menu) {
         UnloadTextureSafe(&menu->buttons[i].normal);
         UnloadTextureSafe(&menu->buttons[i].active);
     }
+
+    UnloadTextureSafe(&menu->exitCornerBtn.normal);
+    UnloadTextureSafe(&menu->exitCornerBtn.active);
+
     if (menu->audioLoaded) {
         StopSound(menu->hoverSfx);
         StopSound(menu->clickSfx);
@@ -340,6 +366,9 @@ void Menu_Unload(MenuUI *menu) {
         UnloadMusicStream(menu->bgm);
         menu->bgmLoaded = false;
     }
-    s_hoverLooping = false;
-    s_clickLooping = false;
+}
+
+bool Menu_IsExitRequested(const MenuUI *menu) {
+    if (!menu) return false;
+    return menu->exitRequested;
 }

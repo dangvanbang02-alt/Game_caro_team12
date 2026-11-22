@@ -1,7 +1,31 @@
 #include "GameOver.h"
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+
+static Texture2D LoadTextureSafe(const char *path) {
+    Texture2D tex = { 0 };
+    if (path != NULL && path[0] != '\0' && FileExists(path)) {
+        tex = LoadTexture(path);
+        if (tex.id > 0) {
+            SetTextureFilter(tex, TEXTURE_FILTER_BILINEAR);
+        }
+    }
+    return tex;
+}
+
+static void UnloadTextureSafe(Texture2D *tex) {
+    if (tex != NULL && tex->id > 0) {
+        UnloadTexture(*tex);
+        tex->id = 0;
+    }
+}
+
+static void DrawTextureFit(Texture2D tex, Rectangle dest, Color tint) {
+    if (tex.id <= 0) return;
+    Rectangle src = { 0.0f, 0.0f, (float)tex.width, (float)tex.height };
+    DrawTexturePro(tex, src, dest, (Vector2){ 0.0f, 0.0f }, 0.0f, tint);
+}
 
 static float Clamp01(float v) {
     if (v < 0.0f) return 0.0f;
@@ -9,120 +33,66 @@ static float Clamp01(float v) {
     return v;
 }
 
-static float LerpFloat(float a, float b, float t) {
-    return a + (b - a) * t;
+static void PlayGameOverClickOnce(MenuUI *menu) {
+    if (!menu || !menu->audioLoaded) return;
+    StopSound(menu->hoverSfx);
+    StopSound(menu->clickSfx);
+    PlaySound(menu->clickSfx);
 }
 
-static void CopySubtitleSafe(char *dst, const char *src, const char *fallback) {
-    if (!dst) return;
-    const char *text = (src && src[0] != '\0') ? src : fallback;
-    strncpy(dst, text, GAMEOVER_REASON_MAX_LEN - 1);
-    dst[GAMEOVER_REASON_MAX_LEN - 1] = '\0';
-}
-
-static void PlayHoverSfx(const GameOverUI *ui) {
-    if (ui && ui->hasHoverSound && ui->hoverSound.frameCount > 0) {
-        PlaySound(ui->hoverSound);
+static void UpdateLoopingMusic(Music *music, bool loaded, float volume) {
+    if (!loaded || !music) return;
+    SetMusicVolume(*music, volume);
+    UpdateMusicStream(*music);
+    float totalLen = GetMusicTimeLength(*music);
+    float played   = GetMusicTimePlayed(*music);
+    if (!IsMusicStreamPlaying(*music) ||
+        (totalLen > 0.0f && played >= totalLen - 0.05f)) {
+        StopMusicStream(*music);
+        SeekMusicStream(*music, 0.0f);
+        PlayMusicStream(*music);
     }
 }
 
-static void PlayClickSfx(const GameOverUI *ui) {
-    if (ui && ui->hasClickSound && ui->clickSound.frameCount > 0) {
-        PlaySound(ui->clickSound);
-    }
-}
-
-static Color GetOutcomeAccent(GameOverOutcome outcome) {
-    switch (outcome) {
-        case GAMEOVER_OUTCOME_ALPHA_WIN: return GO_COLOR_ALPHA;
-        case GAMEOVER_OUTCOME_OMEGA_WIN: return GO_COLOR_RED;
-        case GAMEOVER_OUTCOME_DRAW:
-        default:                         return GO_COLOR_CREAM;
-    }
-}
-
-static const char *GetOutcomeTitle(GameOverOutcome outcome) {
-    switch (outcome) {
-        case GAMEOVER_OUTCOME_ALPHA_WIN: return "ALPHA VICTORY";
-        case GAMEOVER_OUTCOME_OMEGA_WIN: return "OMEGA VICTORY";
-        case GAMEOVER_OUTCOME_DRAW:      return "MATCH DRAW";
-        default:                         return "GAME OVER";
-    }
-}
-
-static void DrawSlantedButton(const GameOverButton *btn, Color accent) {
-    Rectangle r = btn->rect;
-    float slant = 12.0f;
-    float lift = -3.0f * btn->hoverAnim;
-    float x = r.x;
-    float y = r.y + lift;
-    float w = r.width;
-    float h = r.height;
-
-    Color fill = btn->primary
-                     ? (btn->hoverAnim > 0.2f ? GO_COLOR_RED : Fade(GO_COLOR_RED, 0.85f))
-                     : (btn->hoverAnim > 0.2f ? GO_COLOR_PANEL_LITE : GO_COLOR_PANEL);
-    Color border = btn->primary
-                       ? GO_COLOR_CREAM
-                       : (btn->hoverAnim > 0.2f ? accent : GO_COLOR_BORDER);
-
-    Vector2 p0 = { x + slant, y };
-    Vector2 p1 = { x + w, y };
-    Vector2 p2 = { x + w - slant, y + h };
-    Vector2 p3 = { x, y + h };
-
-    DrawTriangle(p0, p3, p1, fill);
-    DrawTriangle(p1, p3, p2, fill);
-
-    DrawLineEx(p0, p1, 2.0f, border);
-    DrawLineEx(p1, p2, 2.0f, border);
-    DrawLineEx(p2, p3, 2.0f, border);
-    DrawLineEx(p3, p0, 2.0f, border);
-
-    int fontSize = 18;
-    int textW = MeasureText(btn->label, fontSize);
-    DrawText(
-        btn->label,
-        (int)(x + (w - textW) * 0.5f),
-        (int)(y + (h - fontSize) * 0.5f),
-        fontSize,
-        GO_COLOR_CREAM
-    );
-}
-
-void GameOver_Init(GameOverUI *ui, int screenWidth, int screenHeight) {
+void GameOver_SetMusicVolume(GameOverUI *ui, float volume) {
     if (!ui) return;
+    ui->musicVolume = Clamp01(volume);
+    if (ui->winBgmLoaded) {
+        SetMusicVolume(ui->winBgm, ui->musicVolume);
+    }
+    if (ui->loseBgmLoaded) {
+        SetMusicVolume(ui->loseBgm, ui->musicVolume);
+    }
+    if (ui->drawBgmLoaded) {
+        SetMusicVolume(ui->drawBgm, ui->musicVolume);
+    }
+}
 
-    memset(ui, 0, sizeof(*ui));
-    ui->active = false;
-    ui->outcome = GAMEOVER_OUTCOME_NONE;
-    CopySubtitleSafe(ui->subtitle, "FIVE IN A ROW", "FIVE IN A ROW");
-    ui->roundNumber = 1;
-    ui->hoveredIndex = 0;
-    ui->appearAnim = 0.0f;
-
-    ui->btnPlayAgain.label = "PLAY AGAIN";
-    ui->btnPlayAgain.primary = true;
-
-    ui->btnAgentSelect.label = "AGENT SELECT";
-    ui->btnAgentSelect.primary = false;
-
-    ui->btnMainMenu.label = "MAIN MENU";
-    ui->btnMainMenu.primary = false;
-
-    GameOver_Resize(ui, screenWidth, screenHeight);
+void GameOver_StopMusic(GameOverUI *ui) {
+    if (!ui) return;
+    if (ui->winBgmLoaded && IsMusicStreamPlaying(ui->winBgm)) {
+        StopMusicStream(ui->winBgm);
+    }
+    if (ui->loseBgmLoaded && IsMusicStreamPlaying(ui->loseBgm)) {
+        StopMusicStream(ui->loseBgm);
+    }
+    if (ui->drawBgmLoaded && IsMusicStreamPlaying(ui->drawBgm)) {
+        StopMusicStream(ui->drawBgm);
+    }
 }
 
 void GameOver_Resize(GameOverUI *ui, int screenWidth, int screenHeight) {
     if (!ui) return;
+    float sw = (float)screenWidth;
+    float sh = (float)screenHeight;
 
-    float sw = (float)((screenWidth > 0) ? screenWidth : 1280);
-    float sh = (float)((screenHeight > 0) ? screenHeight : 720);
-
-    float panelW = fminf(620.0f, sw * 0.72f);
-    float panelH = fminf(430.0f, sh * 0.68f);
-    if (panelW < 320.0f) panelW = sw * 0.85f;
-    if (panelH < 280.0f) panelH = sh * 0.75f;
+    Texture2D refTex = (ui->alphaFull.id > 0) ? ui->alphaFull
+                     : ((ui->omegaFull.id > 0) ? ui->omegaFull : ui->drawImg);
+    float panelW = fminf(860.0f, sw * 0.72f);
+    float aspect = (refTex.id > 0 && refTex.width > 0)
+                   ? ((float)refTex.height / (float)refTex.width)
+                   : 0.52f;
+    float panelH = panelW * aspect;
 
     ui->panelRect = (Rectangle){
         (sw - panelW) * 0.5f,
@@ -130,217 +100,282 @@ void GameOver_Resize(GameOverUI *ui, int screenWidth, int screenHeight) {
         panelW,
         panelH
     };
-
-    float btnGap = 14.0f;
-    float padX = 36.0f;
-    float btnW = (panelW - padX * 2.0f - btnGap * 2.0f) / 3.0f;
-    float btnH = 46.0f;
-    float btnY = ui->panelRect.y + panelH - btnH - 28.0f;
-
-    ui->btnPlayAgain.rect   = (Rectangle){ ui->panelRect.x + padX, btnY, btnW, btnH };
-    ui->btnAgentSelect.rect = (Rectangle){ ui->panelRect.x + padX + (btnW + btnGap), btnY, btnW, btnH };
-    ui->btnMainMenu.rect    = (Rectangle){ ui->panelRect.x + padX + (btnW + btnGap) * 2.0f, btnY, btnW, btnH };
 }
 
-void GameOver_SetAudio(GameOverUI *ui, Sound hoverSound, Sound clickSound) {
-    if (!ui) return;
-    ui->hoverSound = hoverSound;
-    ui->clickSound = clickSound;
-    ui->hasHoverSound = (hoverSound.frameCount > 0);
-    ui->hasClickSound = (clickSound.frameCount > 0);
-}
-
-void GameOver_Open(GameOverUI *ui,
-                   GameOverOutcome outcome,
-                   const char *subtitle,
-                   int roundNumber,
-                   int alphaWins,
-                   int omegaWins,
-                   Texture2D winnerPortrait) {
+void GameOver_Open(GameOverUI *ui, const GameHUD *hud, bool isPveMode, int pvePlayerPiece) {
     if (!ui) return;
 
-    ui->active = true;
-    ui->outcome = (outcome != GAMEOVER_OUTCOME_NONE) ? outcome : GAMEOVER_OUTCOME_DRAW;
-    CopySubtitleSafe(ui->subtitle, subtitle, "MATCH COMPLETED");
-    ui->roundNumber = (roundNumber > 0) ? roundNumber : 1;
-    ui->alphaWins = (alphaWins >= 0) ? alphaWins : 0;
-    ui->omegaWins = (omegaWins >= 0) ? omegaWins : 0;
-    ui->winnerPortrait = winnerPortrait;
-    ui->hoveredIndex = 0;
-    ui->appearAnim = 0.0f;
-}
+    ui->openAnim   = 0.0f;
+    ui->pulseTimer = 0.0f;
 
-void GameOver_Close(GameOverUI *ui) {
-    if (!ui) return;
-    ui->active = false;
-    ui->appearAnim = 0.0f;
-}
+    if (hud) {
+        ui->winnerPiece = HUD_GetChampionPiece(hud);
+        ui->alphaScore  = hud->alphaButtons;
+        ui->omegaScore  = hud->omegaButtons;
 
-bool GameOver_IsActive(const GameOverUI *ui) {
-    return ui ? ui->active : false;
-}
+        if (ui->winnerPiece == 3) {
+            snprintf(ui->winnerName, sizeof(ui->winnerName), "ALPHA & OMEGA");
+        } else if (ui->winnerPiece == 2) {
+            snprintf(ui->winnerName, sizeof(ui->winnerName), "%s",
+                     (hud->p2.name[0] != '\0') ? hud->p2.name : "OMEGA");
+        } else {
+            ui->winnerPiece = 1;
+            snprintf(ui->winnerName, sizeof(ui->winnerName), "%s",
+                     (hud->p1.name[0] != '\0') ? hud->p1.name : "ALPHA");
+        }
+    } else {
+        ui->winnerPiece = 1;
+        ui->alphaScore  = 5;
+        ui->omegaScore  = 0;
+        snprintf(ui->winnerName, sizeof(ui->winnerName), "ALPHA");
+    }
 
-static GameOverAction TriggerButtonAt(GameOverUI *ui, int idx) {
-    PlayClickSfx(ui);
-    ui->active = false;
-    switch (idx) {
-        case 0:  return GAMEOVER_ACTION_PLAY_AGAIN;
-        case 1:  return GAMEOVER_ACTION_AGENT_SELECT;
-        case 2:
-        default: return GAMEOVER_ACTION_MAIN_MENU;
+    if (ui->winnerPiece == 3) {
+        ui->activeMusic = GAMEOVER_MUSIC_DRAW;
+    } else if (isPveMode) {
+        ui->activeMusic = (ui->winnerPiece == pvePlayerPiece) ? GAMEOVER_MUSIC_WIN : GAMEOVER_MUSIC_LOSE;
+    } else {
+        ui->activeMusic = GAMEOVER_MUSIC_WIN;
+    }
+
+    GameOver_StopMusic(ui);
+
+    if (ui->activeMusic == GAMEOVER_MUSIC_DRAW) {
+        if (ui->drawBgmLoaded) {
+            SeekMusicStream(ui->drawBgm, 0.0f);
+            SetMusicVolume(ui->drawBgm, ui->musicVolume);
+            PlayMusicStream(ui->drawBgm);
+        }
+    } else if (ui->activeMusic == GAMEOVER_MUSIC_WIN) {
+        if (ui->winBgmLoaded) {
+            SeekMusicStream(ui->winBgm, 0.0f);
+            SetMusicVolume(ui->winBgm, ui->musicVolume);
+            PlayMusicStream(ui->winBgm);
+        }
+    } else {
+        if (ui->loseBgmLoaded) {
+            SeekMusicStream(ui->loseBgm, 0.0f);
+            SetMusicVolume(ui->loseBgm, ui->musicVolume);
+            PlayMusicStream(ui->loseBgm);
+        }
     }
 }
 
-GameOverAction GameOver_Update(GameOverUI *ui, float dt) {
-    if (!ui || !ui->active) return GAMEOVER_ACTION_NONE;
-    if (dt <= 0.0f) dt = 0.016f;
+void GameOver_Init(GameOverUI *ui, int screenWidth, int screenHeight) {
+    if (!ui) return;
+    memset(ui, 0, sizeof(GameOverUI));
 
-    ui->appearAnim = Clamp01(LerpFloat(ui->appearAnim, 1.0f, Clamp01(10.0f * dt)));
+    ui->musicVolume = 1.0f;
+    ui->activeMusic = GAMEOVER_MUSIC_WIN;
 
-    GameOverButton *btns[3] = {
-        &ui->btnPlayAgain,
-        &ui->btnAgentSelect,
-        &ui->btnMainMenu
-    };
+    ui->alphaBg   = LoadTextureSafe(GAMEOVER_IMG_ALPHA_BG);
+    ui->alphaFull = LoadTextureSafe(GAMEOVER_IMG_ALPHA_FULL);
+    ui->omegaBg   = LoadTextureSafe(GAMEOVER_IMG_OMEGA_BG);
+    ui->omegaFull = LoadTextureSafe(GAMEOVER_IMG_OMEGA_FULL);
+    ui->drawImg   = LoadTextureSafe(GAMEOVER_IMG_DRAW);
 
-    Vector2 mouse = GetMousePosition();
-    int newHover = -1;
-    for (int i = 0; i < 3; i++) {
-        if (CheckCollisionPointRec(mouse, btns[i]->rect)) {
-            newHover = i;
-            break;
+    if (IsAudioDeviceReady()) {
+        if (FileExists(GAMEOVER_BGM_WIN)) {
+            ui->winBgm = LoadMusicStream(GAMEOVER_BGM_WIN);
+            ui->winBgm.looping = true;
+            ui->winBgmLoaded = true;
+        }
+        if (FileExists(GAMEOVER_BGM_LOSE)) {
+            ui->loseBgm = LoadMusicStream(GAMEOVER_BGM_LOSE);
+            ui->loseBgm.looping = true;
+            ui->loseBgmLoaded = true;
+        }
+        if (FileExists(GAMEOVER_BGM_DRAW)) {
+            ui->drawBgm = LoadMusicStream(GAMEOVER_BGM_DRAW);
+            ui->drawBgm.looping = true;
+            ui->drawBgmLoaded = true;
         }
     }
 
-    if (newHover != -1 && newHover != ui->hoveredIndex) {
-        ui->hoveredIndex = newHover;
-        PlayHoverSfx(ui);
+    ui->winnerPiece = 1;
+    snprintf(ui->winnerName, sizeof(ui->winnerName), "ALPHA");
+
+    GameOver_Resize(ui, screenWidth, screenHeight);
+}
+
+GameOverAction GameOver_Update(GameOverUI *ui, MenuUI *menu, float dt) {
+    if (!ui) return GAMEOVER_ACTION_NONE;
+
+    if (ui->activeMusic == GAMEOVER_MUSIC_DRAW) {
+        UpdateLoopingMusic(&ui->drawBgm, ui->drawBgmLoaded, ui->musicVolume);
+    } else if (ui->activeMusic == GAMEOVER_MUSIC_WIN) {
+        UpdateLoopingMusic(&ui->winBgm, ui->winBgmLoaded, ui->musicVolume);
+    } else {
+        UpdateLoopingMusic(&ui->loseBgm, ui->loseBgmLoaded, ui->musicVolume);
     }
 
-    if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
-        ui->hoveredIndex = (ui->hoveredIndex + 2) % 3;
-        PlayHoverSfx(ui);
-    } else if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
-        ui->hoveredIndex = (ui->hoveredIndex + 1) % 3;
-        PlayHoverSfx(ui);
+    ui->pulseTimer += dt;
+
+    if (ui->openAnim < 1.0f) {
+        ui->openAnim += dt * 2.2f;
+        if (ui->openAnim > 1.0f) ui->openAnim = 1.0f;
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || IsKeyPressed(KEY_SPACE)) {
+            ui->openAnim = 1.0f;
+        }
+        return GAMEOVER_ACTION_NONE;
     }
 
-    for (int i = 0; i < 3; i++) {
-        float target = (i == ui->hoveredIndex) ? 1.0f : 0.0f;
-        btns[i]->hoverAnim = Clamp01(LerpFloat(btns[i]->hoverAnim, target, Clamp01(14.0f * dt)));
-    }
+    Vector2 mouse = GetMousePosition();
+    bool overPanel = CheckCollisionPointRec(mouse, ui->panelRect);
+    SetMouseCursor(overPanel ? MOUSE_CURSOR_POINTING_HAND : MOUSE_CURSOR_DEFAULT);
 
-    if (newHover != -1 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        return TriggerButtonAt(ui, newHover);
-    }
+    bool exitRequested = (overPanel && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) ||
+                         IsKeyPressed(KEY_ESCAPE) ||
+                         IsKeyPressed(KEY_ENTER) ||
+                         IsKeyPressed(KEY_KP_ENTER);
 
-    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_R)) {
-        int idx = (ui->hoveredIndex >= 0 && ui->hoveredIndex < 3) ? ui->hoveredIndex : 0;
-        return TriggerButtonAt(ui, idx);
-    }
-
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        return TriggerButtonAt(ui, 2);
+    if (exitRequested) {
+        GameOver_StopMusic(ui);
+        PlayGameOverClickOnce(menu);
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        return GAMEOVER_ACTION_BACK_TO_MENU;
     }
 
     return GAMEOVER_ACTION_NONE;
 }
 
 void GameOver_Draw(const GameOverUI *ui) {
-    if (!ui || !ui->active) return;
+    if (!ui) return;
 
-    int sw = GetScreenWidth();
-    int sh = GetScreenHeight();
+    float t         = ui->openAnim;
+    float bgAlpha   = Clamp01(t / 0.45f);
+    float scale     = 0.94f + 0.06f * (1.0f - powf(1.0f - bgAlpha, 3.0f));
+    float fullAlpha = Clamp01((t - 0.35f) / 0.65f);
 
-    // Lớp phủ làm mờ bàn cờ phía sau
-    DrawRectangle(0, 0, sw, sh, GO_COLOR_BG_DIM);
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.80f * bgAlpha));
 
-    Rectangle p = ui->panelRect;
-    float slideY = (1.0f - ui->appearAnim) * 18.0f;
-    p.y += slideY;
+    Rectangle animRect = {
+        ui->panelRect.x + ui->panelRect.width * (1.0f - scale) * 0.5f,
+        ui->panelRect.y + ui->panelRect.height * (1.0f - scale) * 0.5f,
+        ui->panelRect.width * scale,
+        ui->panelRect.height * scale
+    };
 
-    Color accent = GetOutcomeAccent(ui->outcome);
-    const char *title = GetOutcomeTitle(ui->outcome);
+    Color accent = GAMEOVER_ACCENT_MINT;
 
-    // Khung chính + thanh nhấn trên cùng
-    DrawRectangleRec(p, GO_COLOR_PANEL);
-    DrawRectangleLinesEx(p, 1.8f, GO_COLOR_BORDER);
-    DrawRectangle((int)p.x, (int)p.y, (int)p.width, 4, accent);
-
-    // Nhãn ván đấu nhỏ góc trên
-    char roundTag[32];
-    snprintf(roundTag, sizeof(roundTag), "ROUND %02d", ui->roundNumber);
-    DrawText(roundTag, (int)(p.x + 24.0f), (int)(p.y + 16.0f), 15, GO_COLOR_MUTED);
-
-    // Tiêu đề thắng / hòa
-    int titleSize = 34;
-    int titleW = MeasureText(title, titleSize);
-    DrawText(
-        title,
-        (int)(p.x + (p.width - titleW) * 0.5f),
-        (int)(p.y + 42.0f),
-        titleSize,
-        accent
-    );
-
-    // Mô tả ngắn (ví dụ: FIVE IN A ROW)
-    int subSize = 16;
-    int subW = MeasureText(ui->subtitle, subSize);
-    DrawText(
-        ui->subtitle,
-        (int)(p.x + (p.width - subW) * 0.5f),
-        (int)(p.y + 84.0f),
-        subSize,
-        GO_COLOR_MUTED
-    );
-
-    // Khung chân dung bên trái (nếu có) + bảng tỉ số ALPHA / OMEGA bên phải
-    float midY = p.y + 118.0f;
-    float portSize = 96.0f;
-    Rectangle portRect = { p.x + 54.0f, midY, portSize, portSize };
-
-    if (ui->winnerPortrait.id > 0) {
-        Rectangle src = {
-            0.0f,
-            0.0f,
-            (float)ui->winnerPortrait.width,
-            (float)ui->winnerPortrait.height
-        };
-        DrawTexturePro(ui->winnerPortrait, src, portRect, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
-        DrawRectangleLinesEx(portRect, 1.5f, accent);
+    if (ui->winnerPiece == 3) {
+        accent = GAMEOVER_ACCENT_GOLD;
+        if (ui->drawImg.id > 0) {
+            DrawTextureFit(ui->drawImg, animRect, Fade(WHITE, bgAlpha));
+        } else {
+            DrawRectangleRec(animRect, Fade((Color){ 16, 20, 27, 245 }, bgAlpha));
+        }
     } else {
-        DrawRectangleRec(portRect, GO_COLOR_PANEL_LITE);
-        DrawRectangleLinesEx(portRect, 1.5f, accent);
-        const char *tag = (ui->outcome == GAMEOVER_OUTCOME_ALPHA_WIN) ? "ALPHA" :
-                          (ui->outcome == GAMEOVER_OUTCOME_OMEGA_WIN) ? "OMEGA" : "DRAW";
-        int tagW = MeasureText(tag, 18);
-        DrawText(
-            tag,
-            (int)(portRect.x + (portSize - tagW) * 0.5f),
-            (int)(portRect.y + (portSize - 18) * 0.5f),
-            18,
-            accent
-        );
+        bool isAlpha      = (ui->winnerPiece != 2);
+        Texture2D bgTex   = isAlpha ? ui->alphaBg   : ui->omegaBg;
+        Texture2D fullTex = isAlpha ? ui->alphaFull : ui->omegaFull;
+        accent            = isAlpha ? GAMEOVER_ACCENT_MINT : GAMEOVER_ACCENT_RED;
+
+        if (bgTex.id > 0) {
+            DrawTextureFit(bgTex, animRect, Fade(WHITE, bgAlpha));
+        } else {
+            DrawRectangleRec(animRect, Fade((Color){ 16, 20, 27, 245 }, bgAlpha));
+        }
+
+        if (fullTex.id > 0 && fullAlpha > 0.0f) {
+            DrawTextureFit(fullTex, animRect, Fade(WHITE, fullAlpha));
+        }
     }
 
-    float scoreX = portRect.x + portSize + 36.0f;
-    char alphaScore[48];
-    char omegaScore[48];
-    snprintf(alphaScore, sizeof(alphaScore), "ALPHA WINS : %d", ui->alphaWins);
-    snprintf(omegaScore, sizeof(omegaScore), "OMEGA WINS : %d", ui->omegaWins);
+    if (t >= 0.95f) {
+        Rectangle p = ui->panelRect;
 
-    DrawText(alphaScore, (int)scoreX, (int)(midY + 12.0f), 20, GO_COLOR_ALPHA);
-    DrawText(omegaScore, (int)scoreX, (int)(midY + 46.0f), 20, GO_COLOR_RED);
+        int nameFontSize = (int)(p.height * 0.052f);
+        if (nameFontSize < 16) nameFontSize = 16;
 
-    // Dịch nút theo slideY nếu đang mở
-    GameOverButton b0 = ui->btnPlayAgain;
-    GameOverButton b1 = ui->btnAgentSelect;
-    GameOverButton b2 = ui->btnMainMenu;
-    b0.rect.y += slideY;
-    b1.rect.y += slideY;
-    b2.rect.y += slideY;
+        Rectangle nameMask = {
+            p.x + p.width * 0.34f,
+            p.y + p.height * 0.34f,
+            p.width * 0.32f,
+            p.height * 0.09f
+        };
+        DrawRectangleRec(nameMask, Fade((Color){ 14, 18, 22, 235 }, 0.92f));
 
-    DrawSlantedButton(&b0, accent);
-    DrawSlantedButton(&b1, accent);
-    DrawSlantedButton(&b2, accent);
+        int nameW = MeasureText(ui->winnerName, nameFontSize);
+        DrawText(ui->winnerName,
+                 (int)(p.x + (p.width - nameW) * 0.5f),
+                 (int)(nameMask.y + (nameMask.height - nameFontSize) * 0.5f),
+                 nameFontSize,
+                 accent);
+
+        int scoreFontSize = (int)(p.height * 0.068f);
+        if (scoreFontSize < 20) scoreFontSize = 20;
+
+        char leftScoreBuf[8];
+        char rightScoreBuf[8];
+        snprintf(leftScoreBuf, sizeof(leftScoreBuf), "%d", ui->alphaScore);
+        snprintf(rightScoreBuf, sizeof(rightScoreBuf), "%d", ui->omegaScore);
+
+        Rectangle leftMask = {
+            p.x + p.width * 0.265f,
+            p.y + p.height * 0.455f,
+            p.width * 0.075f,
+            p.height * 0.11f
+        };
+        Rectangle rightMask = {
+            p.x + p.width * 0.660f,
+            p.y + p.height * 0.455f,
+            p.width * 0.075f,
+            p.height * 0.11f
+        };
+        DrawRectangleRec(leftMask, Fade((Color){ 14, 18, 22, 235 }, 0.92f));
+        DrawRectangleRec(rightMask, Fade((Color){ 14, 18, 22, 235 }, 0.92f));
+
+        int lw = MeasureText(leftScoreBuf, scoreFontSize);
+        int rw = MeasureText(rightScoreBuf, scoreFontSize);
+
+        DrawText(leftScoreBuf,
+                 (int)(leftMask.x + (leftMask.width - lw) * 0.5f),
+                 (int)(leftMask.y + (leftMask.height - scoreFontSize) * 0.5f),
+                 scoreFontSize,
+                 GAMEOVER_ACCENT_MINT);
+
+        DrawText(rightScoreBuf,
+                 (int)(rightMask.x + (rightMask.width - rw) * 0.5f),
+                 (int)(rightMask.y + (rightMask.height - scoreFontSize) * 0.5f),
+                 scoreFontSize,
+                 GAMEOVER_ACCENT_RED);
+
+        float hintAlpha = 0.45f + 0.35f * sinf(ui->pulseTimer * 3.5f);
+        const char *hint = "CLICK ANYWHERE OR PRESS ESC TO RETURN TO MENU";
+        int hintSize = (int)(p.height * 0.032f);
+        if (hintSize < 12) hintSize = 12;
+        int hw = MeasureText(hint, hintSize);
+        DrawText(hint,
+                 (int)(p.x + (p.width - hw) * 0.5f),
+                 (int)(p.y + p.height * 0.88f),
+                 hintSize,
+                 Fade(WHITE, hintAlpha));
+    }
+}
+
+void GameOver_Unload(GameOverUI *ui) {
+    if (!ui) return;
+    UnloadTextureSafe(&ui->alphaBg);
+    UnloadTextureSafe(&ui->alphaFull);
+    UnloadTextureSafe(&ui->omegaBg);
+    UnloadTextureSafe(&ui->omegaFull);
+    UnloadTextureSafe(&ui->drawImg);
+
+    if (ui->winBgmLoaded) {
+        StopMusicStream(ui->winBgm);
+        UnloadMusicStream(ui->winBgm);
+        ui->winBgmLoaded = false;
+    }
+    if (ui->loseBgmLoaded) {
+        StopMusicStream(ui->loseBgm);
+        UnloadMusicStream(ui->loseBgm);
+        ui->loseBgmLoaded = false;
+    }
+    if (ui->drawBgmLoaded) {
+        StopMusicStream(ui->drawBgm);
+        UnloadMusicStream(ui->drawBgm);
+        ui->drawBgmLoaded = false;
+    }
 }
