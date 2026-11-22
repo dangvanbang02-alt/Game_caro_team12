@@ -1,4 +1,4 @@
-#include "Settings.h"
+#include "Setting.h"
 #include <string.h>
 #include <math.h>
 
