@@ -1,6 +1,3 @@
-#ifndef _CRT_SECURE_NO_WARNINGS
-#define _CRT_SECURE_NO_WARNINGS
-#endif
 #include <stdlib.h>
 #include "bot.h"
 
@@ -25,7 +22,7 @@ static int in_bounds(int r, int c)
 
 static int opponent_of(int player)
 {
-    return (player == BOT_X) ? BOT_O : BOT_X;
+    return (player == CELL_X) ? CELL_O : CELL_X;
 }
 
 static int count_stones(int board[BOARD_SIZE][BOARD_SIZE])
@@ -33,7 +30,7 @@ static int count_stones(int board[BOARD_SIZE][BOARD_SIZE])
     int r, c, n = 0;
     for (r = 0; r < BOARD_SIZE; r++)
         for (c = 0; c < BOARD_SIZE; c++)
-            if (board[r][c] != BOT_EMPTY)
+            if (board[r][c] != CELL_EMPTY)
                 n++;
     return n;
 }
@@ -48,7 +45,7 @@ static int has_neighbor(int board[BOARD_SIZE][BOARD_SIZE], int r, int c, int rad
     int i, j;
     for (i = r - radius; i <= r + radius; i++)
         for (j = c - radius; j <= c + radius; j++)
-            if (in_bounds(i, j) && board[i][j] != BOT_EMPTY)
+            if (in_bounds(i, j) && board[i][j] != CELL_EMPTY)
                 return 1;
     return 0;
 }
@@ -108,7 +105,7 @@ static int cell_score(int board[BOARD_SIZE][BOARD_SIZE], int r, int c, int playe
             nc = c + DC[d] * k;
             if (!in_bounds(nr, nc)) break;
             if (board[nr][nc] == player) { cnt++; continue; }
-            if (board[nr][nc] == BOT_EMPTY) open++;
+            if (board[nr][nc] == CELL_EMPTY) open++;
             break;
         }
         for (k = 1; ; k++) {
@@ -116,7 +113,7 @@ static int cell_score(int board[BOARD_SIZE][BOARD_SIZE], int r, int c, int playe
             nc = c - DC[d] * k;
             if (!in_bounds(nr, nc)) break;
             if (board[nr][nc] == player) { cnt++; continue; }
-            if (board[nr][nc] == BOT_EMPTY) open++;
+            if (board[nr][nc] == CELL_EMPTY) open++;
             break;
         }
         total += line_score(cnt, open);
@@ -172,7 +169,7 @@ static int gather_candidates(int board[BOARD_SIZE][BOARD_SIZE], Cand *out)
 
     for (r = 0; r < BOARD_SIZE; r++) {
         for (c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] == BOT_EMPTY && has_neighbor(board, r, c, CAND_RADIUS)) {
+            if (board[r][c] == CELL_EMPTY && has_neighbor(board, r, c, CAND_RADIUS)) {
                 out[n].row = r;
                 out[n].col = c;
                 out[n].score = 0;
@@ -207,15 +204,15 @@ static BotMove find_winning_move(int board[BOARD_SIZE][BOARD_SIZE], int player)
     int r, c;
     for (r = 0; r < BOARD_SIZE; r++) {
         for (c = 0; c < BOARD_SIZE; c++) {
-            if (board[r][c] != BOT_EMPTY) continue;
+            if (board[r][c] != CELL_EMPTY) continue;
             board[r][c] = player;
             if (check_win_at(board, r, c, player)) {
-                board[r][c] = BOT_EMPTY;
+                board[r][c] = CELL_EMPTY;
                 m.row = r;
                 m.col = c;
                 return m;
             }
-            board[r][c] = BOT_EMPTY;
+            board[r][c] = CELL_EMPTY;
         }
     }
     return m;
@@ -300,7 +297,7 @@ static int minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int 
             board[cands[i].row][cands[i].col] = current;
             val = minimax(board, depth - 1, alpha, beta, 0, bot,
                           cands[i].row, cands[i].col, current);
-            board[cands[i].row][cands[i].col] = BOT_EMPTY;
+            board[cands[i].row][cands[i].col] = CELL_EMPTY;
 
             if (val > best) best = val;
             if (best > alpha) alpha = best;
@@ -312,7 +309,7 @@ static int minimax(int board[BOARD_SIZE][BOARD_SIZE], int depth, int alpha, int 
             board[cands[i].row][cands[i].col] = current;
             val = minimax(board, depth - 1, alpha, beta, 1, bot,
                           cands[i].row, cands[i].col, current);
-            board[cands[i].row][cands[i].col] = BOT_EMPTY;
+            board[cands[i].row][cands[i].col] = CELL_EMPTY;
 
             if (val < best) best = val;
             if (best < beta) beta = best;
@@ -353,7 +350,7 @@ static BotMove move_hard(int board[BOARD_SIZE][BOARD_SIZE], int bot)
         board[cands[i].row][cands[i].col] = bot;
         val = minimax(board, HARD_DEPTH - 1, alpha, 2 * WIN_SCORE, 0, bot,
                       cands[i].row, cands[i].col, bot);
-        board[cands[i].row][cands[i].col] = BOT_EMPTY;
+        board[cands[i].row][cands[i].col] = CELL_EMPTY;
 
         if (val > best) {
             best = val;
