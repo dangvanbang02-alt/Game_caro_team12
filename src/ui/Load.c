@@ -93,6 +93,10 @@ bool Load_SaveMatch(const SavedMatchData *matchData) {
         seq++;
     } while (FileExists(fullPath) && seq < 100);
 
+    if (FileExists(fullPath)) {
+        return false; 
+    }
+
     FILE *fp = fopen(fullPath, "wb");
     if (!fp) return false;
 
@@ -107,8 +111,26 @@ static bool ReadSaveFile(const char *path, SavedMatchData *outData) {
     if (!fp) return false;
 
     size_t readCount = fread(outData, sizeof(SavedMatchData), 1, fp);
+    int extraByte = fgetc(fp); 
     fclose(fp);
-    return (readCount == 1);
+
+    if (readCount != 1 || extraByte != EOF) {
+        return false;
+    }
+    int maxRows = (int)(sizeof(outData->board) / sizeof(outData->board[0]));
+    int maxCols = (int)(sizeof(outData->board[0]) / sizeof(outData->board[0][0]));
+    if (outData->boardRows <= 0 || outData->boardRows > maxRows ||
+        outData->boardCols <= 0 || outData->boardCols > maxCols) {
+        return false;
+    }
+    if (outData->currentTurnPiece != 1 && outData->currentTurnPiece != 2) {
+        return false;
+    }
+    outData->saveName[sizeof(outData->saveName) - 1] = '\0';
+    outData->p1Name[sizeof(outData->p1Name) - 1]     = '\0';
+    outData->p2Name[sizeof(outData->p2Name) - 1]     = '\0';
+
+    return true;
 }
 
 static int CompareSlotsNewestFirst(const void *a, const void *b) {
@@ -203,11 +225,15 @@ void Load_Resize(LoadUI *ui, int screenWidth, int screenHeight) {
         closeSize
     };
 
-    float slotX = p.x + p.width * 0.082f;
-    float slotW = p.width * 0.815f;
-    float slotH = p.height * 0.175f;
-    ui->slotRects[0] = (Rectangle){ slotX, p.y + p.height * 0.258f, slotW, slotH };
-    ui->slotRects[1] = (Rectangle){ slotX, p.y + p.height * 0.505f, slotW, slotH };
+   float slotX   = p.x + p.width * 0.082f;
+   float slotW   = p.width * 0.815f;
+   float slotH   = p.height * 0.175f;
+   float startY  = p.y + p.height * 0.258f;
+   float stepY   = p.height * 0.247f; 
+
+    for (int i = 0; i < LOAD_VISIBLE_SLOTS; i++) {
+        ui->slotRects[i] = (Rectangle){ slotX, startY + i * stepY, slotW, slotH };
+    }
 
     ui->scrollTrackRect = (Rectangle){
         slotX + slotW + p.width * 0.012f,
