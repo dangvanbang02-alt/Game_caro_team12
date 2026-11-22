@@ -700,7 +700,7 @@ HudPauseAction HUD_HandlePauseInput(GameHUD *hud) {
 
         hud->hoverNameCloseBtn   = CheckCollisionPointRec(mouse, hud->nameCloseBtnRect);
         hud->hoverNameConfirmBtn = CheckCollisionPointRec(mouse, hud->nameConfirmBtnRect);
-        hud->pressNameConfirmBtn = ui_press_check: (hud->hoverNameConfirmBtn && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+        hud->pressNameConfirmBtn = (hud->hoverNameConfirmBtn && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
 
         if ((hud->hoverNameCloseBtn && IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) || IsKeyPressed(KEY_ESCAPE)) {
             hud->isSaveNaming = false;
@@ -782,5 +782,164 @@ static void DrawPlayerCard(const GameHUD *hud, Rectangle panel, const HudPlayerI
 void HUD_Draw(const GameHUD *hud) {
     if (!hud) return;
 
+    float sw = (float)GetScreenWidth();
+    float sh = (float)GetScreenHeight();
+
     DrawPlayerCard(hud, hud->alphaPanel, &hud->p1, 0, HUD_ACCENT_MINT);
-    DrawPlayerCard(hud, hud->omegaPanel, &hud->p2, 1, HUD_ACCENT_
+    DrawPlayerCard(hud, hud->omegaPanel, &hud->p2, 1, HUD_ACCENT_RED);
+    if (hud->showTurnPng) {
+        Texture2D turnTex = hud->p1.isTurn ? hud->png.turnAlphaPng : hud->png.turnOmegaPng;
+        Rectangle turnBox = { sw * 0.5f - 140.0f, sh * 0.025f, 280.0f, 54.0f };
+        if (turnTex.id > 0) {
+            DrawTextureCenteredKeepAspect(turnTex, turnBox, WHITE);
+        } else {
+            const char *turnLabel = hud->p1.isTurn ? "ALPHA TURN" : "OMEGA TURN";
+            Color turnCol = hud->p1.isTurn ? HUD_ACCENT_MINT : HUD_ACCENT_RED;
+            int tw = MeasureText(turnLabel, 22);
+            DrawText(turnLabel, (int)(sw * 0.5f - tw * 0.5f), (int)(turnBox.y + 14.0f), 22, turnCol);
+        }
+    }
+DrawRectangleRec(hud->bottomBar, HUD_PANEL_DARK);
+DrawRectangleLinesEx(hud->bottomBar, 1.0f, Fade(WHITE, 0.25f));
+
+    int barFont = 18;
+    int barTextY = (int)(hud->bottomBar.y + (hud->bottomBar.height - barFont) * 0.5f);
+    DrawText(TextFormat("ROUND %d", hud->round), (int)(hud->bottomBar.x + 16.0f), barTextY, barFont, WHITE);
+
+    const char *statusText = "";
+    Color statusCol = WHITE;
+    if (hud->matchStatus == HUD_MATCH_GAMEOVER_ALPHA) {
+        statusText = "ALPHA WINS THE MATCH!";
+        statusCol = HUD_ACCENT_MINT;
+    } else if (hud->matchStatus == HUD_MATCH_GAMEOVER_OMEGA) {
+        statusText = "OMEGA WINS THE MATCH!";
+        statusCol = HUD_ACCENT_RED;
+    } else if (hud->matchStatus == HUD_MATCH_GAMEOVER_DRAW) {
+        statusText = "MATCH ENDED IN A DRAW!";
+    } else {
+        statusText = TextFormat("%s'S TURN", hud->p1.isTurn ? hud->p1.name : hud->p2.name);
+        statusCol = hud->p1.isTurn ? HUD_ACCENT_MINT : HUD_ACCENT_RED;
+    }
+    int statusW = MeasureText(statusText, barFont);
+    DrawText(statusText, (int)(sw * 0.5f - statusW * 0.5f), barTextY, barFont, statusCol);
+
+    if (hud->saveNoticeTimer > 0.0f) {
+        float noticeAlpha = (hud->saveNoticeTimer < 0.5f) ? (hud->saveNoticeTimer / 0.5f) : 1.0f;
+        const char *savedMsg = "GAME SAVED";
+        int msgW = MeasureText(savedMsg, barFont);
+        DrawText(savedMsg,
+                 (int)(hud->bottomBar.x + hud->bottomBar.width - msgW - 16.0f),
+                 barTextY,
+                 barFont,
+                 Fade(HUD_ACCENT_MINT, noticeAlpha));
+    }
+    Texture2D pauseIcon = hud->hoverPauseIcon ? hud->png.pauseIconHover : hud->png.pauseIconNormal;
+    if (pauseIcon.id > 0) {
+        DrawTextureFit(pauseIcon, hud->pauseIconRect, WHITE);
+    } else {
+        DrawRectangleRec(hud->pauseIconRect, HUD_PANEL_DARK);
+        DrawRectangleLinesEx(hud->pauseIconRect, 1.5f, hud->hoverPauseIcon ? HUD_ACCENT_MINT : WHITE);
+        DrawText("||", (int)(hud->pauseIconRect.x + 14.0f), (int)(hud->pauseIconRect.y + 12.0f), 20, WHITE);
+    }
+    if (hud->isPaused) {
+        float dimAlpha = 0.65f * ((hud->pauseOpenAnim > 0.0f) ? hud->pauseOpenAnim : 1.0f);
+        DrawRectangle(0, 0, (int)sw, (int)sh, Fade(BLACK, dimAlpha));
+
+        if (!hud->isSaveNaming) {
+            Texture2D panelTex = (hud->png.pauseFull.id > 0) ? hud->png.pauseFull : hud->png.pauseBg;
+            if (panelTex.id > 0) {
+                DrawTextureFit(panelTex, hud->pausePanelRect, WHITE);
+            } else {
+                DrawRectangleRec(hud->pausePanelRect, HUD_PANEL_DARK);
+                DrawRectangleLinesEx(hud->pausePanelRect, 2.0f, HUD_ACCENT_MINT);
+                int titleW = MeasureText("PAUSED", 28);
+                DrawText("PAUSED",
+                         (int)(hud->pausePanelRect.x + (hud->pausePanelRect.width - titleW) * 0.5f),
+                         (int)(hud->pausePanelRect.y + 28.0f),
+                         28, WHITE);
+            }
+            if (hud->png.pauseFull.id <= 0) {
+                DrawRectangleRec(hud->saveBtnRect, hud->pressSaveBtn ? HUD_ACCENT_MINT : Fade(HUD_ACCENT_MINT, 0.2f));
+                DrawRectangleLinesEx(hud->saveBtnRect, 1.5f, HUD_ACCENT_MINT);
+                int swTxt = MeasureText("SAVE", 20);
+                DrawText("SAVE",
+                         (int)(hud->saveBtnRect.x + (hud->saveBtnRect.width - swTxt) * 0.5f),
+                         (int)(hud->saveBtnRect.y + (hud->saveBtnRect.height - 20) * 0.5f),
+                         20, WHITE);
+
+                DrawRectangleRec(hud->exitBtnRect, hud->pressExitBtn ? HUD_ACCENT_RED : Fade(HUD_ACCENT_RED, 0.2f));
+                DrawRectangleLinesEx(hud->exitBtnRect, 1.5f, HUD_ACCENT_RED);
+                int ewTxt = MeasureText("EXIT", 20);
+                DrawText("EXIT",
+                         (int)(hud->exitBtnRect.x + (hud->exitBtnRect.width - ewTxt) * 0.5f),
+                         (int)(hud->exitBtnRect.y + (hud->exitBtnRect.height - 20) * 0.5f),
+                         20, WHITE);
+            } else {
+                if (hud->hoverSaveBtn) {
+                    DrawRectangleLinesEx(hud->saveBtnRect, 2.0f, HUD_ACCENT_MINT);
+                }
+                if (hud->hoverExitBtn) {
+                    DrawRectangleLinesEx(hud->exitBtnRect, 2.0f, HUD_ACCENT_RED);
+                }
+            }
+            Texture2D closeTex = hud->hoverCloseBtn ? hud->png.closeHover : hud->png.closeNormal;
+            if (closeTex.id > 0) {
+                DrawTextureFit(closeTex, hud->closeBtnRect, WHITE);
+            } else {
+                DrawRectangleLinesEx(hud->closeBtnRect, 1.5f, hud->hoverCloseBtn ? HUD_ACCENT_RED : WHITE);
+                DrawText("X", (int)(hud->closeBtnRect.x + 10.0f), (int)(hud->closeBtnRect.y + 8.0f), 20, WHITE);
+            }
+        } else {
+            Texture2D nameTex = (hud->png.saveNameFull.id > 0) ? hud->png.saveNameFull : hud->png.saveNameBg;
+            if (nameTex.id > 0) {
+                DrawTextureFit(nameTex, hud->namePanelRect, WHITE);
+            } else {
+                DrawRectangleRec(hud->namePanelRect, HUD_PANEL_DARK);
+                DrawRectangleLinesEx(hud->namePanelRect, 2.0f, HUD_ACCENT_MINT);
+                int titleW = MeasureText("ENTER SAVE NAME", 24);
+                DrawText("ENTER SAVE NAME",
+                         (int)(hud->namePanelRect.x + (hud->namePanelRect.width - titleW) * 0.5f),
+                         (int)(hud->namePanelRect.y + 28.0f),
+                         24, WHITE);
+            }
+            DrawRectangleRec(hud->nameInputBoxRect, (Color){ 10, 13, 18, 245 });
+            DrawRectangleLinesEx(hud->nameInputBoxRect, 2.0f, hud->emptyNameWarning ? HUD_ACCENT_RED : HUD_ACCENT_MINT);
+
+            int inputFont = 20;
+            int inputY = (int)(hud->nameInputBoxRect.y + (hud->nameInputBoxRect.height - inputFont) * 0.5f);
+            const char *cursor = (hud->cursorBlinkTimer < 0.5f) ? "_" : "";
+            DrawText(TextFormat("%s%s", hud->saveNameInput, cursor),
+                     (int)(hud->nameInputBoxRect.x + 12.0f),
+                     inputY,
+                     inputFont,
+                     WHITE);
+
+            if (hud->emptyNameWarning) {
+                DrawText("Please enter a save name!",
+                         (int)hud->nameInputBoxRect.x,
+                         (int)(hud->nameInputBoxRect.y + hud->nameInputBoxRect.height + 6.0f),
+                         16,
+                         HUD_ACCENT_RED);
+            }
+            Texture2D confirmTex = hud->hoverNameConfirmBtn ? hud->png.saveConfirmHover : hud->png.saveConfirmNormal;
+            if (confirmTex.id > 0) {
+                DrawTextureFit(confirmTex, hud->nameConfirmBtnRect, hud->pressNameConfirmBtn ? GRAY : WHITE);
+            } else {
+                DrawRectangleRec(hud->nameConfirmBtnRect, hud->pressNameConfirmBtn ? HUD_ACCENT_MINT : Fade(HUD_ACCENT_MINT, 0.25f));
+                DrawRectangleLinesEx(hud->nameConfirmBtnRect, 1.5f, HUD_ACCENT_MINT);
+                int cw = MeasureText("CONFIRM", 18);
+                DrawText("CONFIRM",
+                         (int)(hud->nameConfirmBtnRect.x + (hud->nameConfirmBtnRect.width - cw) * 0.5f),
+                         (int)(hud->nameConfirmBtnRect.y + (hud->nameConfirmBtnRect.height - 18) * 0.5f),
+                         18, WHITE);
+            }
+            Texture2D nameCloseTex = hud->hoverNameCloseBtn ? hud->png.nameCloseHover : hud->png.nameCloseNormal;
+            if (nameCloseTex.id > 0) {
+                DrawTextureFit(nameCloseTex, hud->nameCloseBtnRect, WHITE);
+            } else {
+                DrawRectangleLinesEx(hud->nameCloseBtnRect, 1.5f, hud->hoverNameCloseBtn ? HUD_ACCENT_RED : WHITE);
+                DrawText("X", (int)(hud->nameCloseBtnRect.x + 10.0f), (int)(hud->nameCloseBtnRect.y + 8.0f), 20, WHITE);
+            }
+        }
+    }
+}
