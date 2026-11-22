@@ -2,7 +2,7 @@
 #define LOAD_H
 
 #include "raylib.h"
-#include "Menu.h"
+#include "menu.h"
 #include "HUD.h"
 #include <stdbool.h>
 
