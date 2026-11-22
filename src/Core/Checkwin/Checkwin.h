@@ -1,5 +1,6 @@
 #ifndef CHECKWIN_H
 #define CHECKWIN_H
+#include <stdio.h>
 #include "Board.h"
 typedef enum {
     GAME_RESULT_ONGOING = 2,

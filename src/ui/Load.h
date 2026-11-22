@@ -1,6 +1,5 @@
 #ifndef LOAD_H
 #define LOAD_H
-
 #include "raylib.h"
 #include "Menu.h"
 #include "HUD.h"

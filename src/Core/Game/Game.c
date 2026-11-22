@@ -135,7 +135,11 @@ void Game_resume(Game*g){
 int Game_setPlayerName(Game*g,Cell s,const char*n){if(!g)return 0;return Player_setName(&g->players[playerIndex(s)],n);}
 int Game_setConfig(Game*g,const GameConfig*c){
     if(!g||!GameConfig_isValid(c)||Board_countMoves(&g->board)>0)return 0;g->config=*c;Timer_init(&g->timer,c->turnTimeLimitMs,c->matchTimeLimitMs);return 1;}
-int Game_playAIMove(Game*g){int r,c;if(!g||g->mode!=GAME_MODE_PVE||g->currentPlayer!=CELL_O||g->result!=GAME_RESULT_ONGOING)return 0;if(!AI_chooseMove(&g->board,CELL_O,g->config.aiDepth,&r,&c))return 0;return Game_playMove(g,r,c);}
+int Game_playAIMove(Game*g){
+    int r,c;
+    if(!g||g->mode!=GAME_MODE_PVE||g->currentPlayer!=CELL_O||g->result!=GAME_RESULT_ONGOING) return 0;
+    if(!AI_chooseMove(&g->board,CELL_O,g->config.aiDepth,&r,&c))return 0;
+    return Game_playMove(g,r,c);}
 int Game_isFinished(const Game*g){return g&&g->result!=GAME_RESULT_ONGOING;}
 Cell Game_getCurrentPlayer(const Game*g){return g?g->currentPlayer:CELL_EMPTY;}
 const PlayerStats* Game_getStatsX(const Game*g){return g?&g->statsX:0;}
