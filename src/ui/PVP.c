@@ -296,7 +296,7 @@ PvpAction Pvp_Update(PvpUI *ui, MenuUI *menu, PlayUI *play, float dt) {
                 return PVP_ACTION_BACK;
             }
             if (confirmed) {
-                ui->result.alphaAgent = (HudAgentId)ui->selectedAgent;
+                ui->result.alphaAgent = (HudAgentId)(ui->selectedAgent + 1);
                 EnterPvpStep(ui, PVP_STEP_ALPHA_NAME);
             }
         }
@@ -325,7 +325,7 @@ PvpAction Pvp_Update(PvpUI *ui, MenuUI *menu, PlayUI *play, float dt) {
                 return PVP_ACTION_NONE;
             }
             if (confirmed) {
-                ui->result.omegaAgent = (HudAgentId)ui->selectedAgent;
+                ui->result.omegaAgent = (HudAgentId)(ui->selectedAgent + 1);
                 EnterPvpStep(ui, PVP_STEP_OMEGA_NAME);
             }
         }
