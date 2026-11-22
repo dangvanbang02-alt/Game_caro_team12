@@ -1,5 +1,11 @@
-﻿#include "raylib.h"
+﻿#include "raylib/include/raylib.h"
 #include "Core/Game/Game.h"
+#include "Core/History/MatchHistory.h"
+#include "Core/History/MoveHistory.h"
+#include "Core/GameTimer/GameTimer.h"
+#include "Core/Board/Board.h"
+#include "Core/Player/Player.h"
+#include "Core/Stats/Stats.h"
 #include "ui/menu.h"
 #include "ui/Play.h"
 #include "ui/PVP.h"
@@ -134,7 +140,7 @@ static void StartMatch(App* app,
     config.aiDepth = aiDepth;
     Game_setConfig(&app->game, &config);
 
-    /* The setup screen may place the human on either side. */
+    
     app->game.aiPlayer = (humanPiece == 1) ? CELL_O : CELL_X;
 
     Game_setPlayerName(&app->game, CELL_X, alphaName);
@@ -238,7 +244,7 @@ static void CompleteRound(App* app)
         return;
     }
 
-    /* Start the next round. The starting side alternates each round. */
+   
     ++app->roundNumber;
     Game_resetRound(&app->game);
     if ((app->roundNumber % 2) == 0) {

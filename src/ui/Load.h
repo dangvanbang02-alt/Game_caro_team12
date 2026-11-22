@@ -39,6 +39,7 @@ typedef struct {
     HudAgentId omegaAgent;
     int gameMode;
     int difficulty;
+    int humanPiece;      /* 1 = ALPHA/X, 2 = OMEGA/O (ben nguoi choi o che do PVE) */
     int boardRows;
     int boardCols;
     int board[LOAD_BOARD_MAX_DIM][LOAD_BOARD_MAX_DIM];

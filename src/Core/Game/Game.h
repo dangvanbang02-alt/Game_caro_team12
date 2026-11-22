@@ -17,6 +17,8 @@ typedef struct {
     Cell currentPlayer;
     GameMode mode;
     AIDifficulty difficulty;
+    Cell currentPlayer;
+    Cell aiPlayer;  
     GameResult result;
     PlayerStats statsX, statsO;
     GameConfig config;

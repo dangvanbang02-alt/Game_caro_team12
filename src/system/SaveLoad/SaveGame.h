@@ -21,7 +21,7 @@ typedef struct {
     int row;
     int col;
     int player;
-} Move;
+} SaveMove;
 
 typedef struct {
     int size;
@@ -31,7 +31,7 @@ typedef struct {
     int botLevel;
     int winLength;
     int moveCount;
-    Move history[MAX_MOVES];
+    SaveMove history[MAX_MOVES];
 } GameState;
 
 typedef enum {
