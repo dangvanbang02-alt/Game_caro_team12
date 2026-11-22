@@ -1,7 +1,7 @@
 #ifndef HUD_H
 #define HUD_H
 #include "raylib.h"
-#include "Menu.h"
+#include "menu.h"
 #include <stdbool.h>
 
 #define HUD_NAME_MAX_LEN      32
