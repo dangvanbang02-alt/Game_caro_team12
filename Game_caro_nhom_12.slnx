@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Game_caro_nhom_12/Game_caro_nhom_12.vcxproj" />
+</Solution>
